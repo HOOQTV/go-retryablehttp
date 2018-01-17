@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/go-cleanhttp"
+	"github.com/rubyist/circuitbreaker"
 )
 
 var (
@@ -34,6 +35,11 @@ var (
 	defaultRetryWaitMin = 1 * time.Second
 	defaultRetryWaitMax = 30 * time.Second
 	defaultRetryMax     = 4
+
+	// Default circuit breaker configuration
+	defaultTimeout    = 1 * time.Minute
+	defaultThreshold  = int64(4)
+	defaultHTTPClient = cleanhttp.DefaultClient()
 
 	// defaultClient is used for performing requests without explicitly making
 	// a new client. It is purposely private to avoid modifications.
@@ -115,8 +121,8 @@ type Backoff func(min, max time.Duration, attemptNum int, resp *http.Response) t
 // Client is used to make HTTP requests. It adds additional functionality
 // like automatic retries to tolerate minor outages.
 type Client struct {
-	HTTPClient *http.Client // Internal HTTP client.
-	Logger     *log.Logger  // Customer logger instance.
+	HTTPClient *circuit.HTTPClient // Internal HTTP client.
+	Logger     *log.Logger         // Customer logger instance.
 
 	RetryWaitMin time.Duration // Minimum time to wait
 	RetryWaitMax time.Duration // Maximum time to wait
@@ -140,8 +146,14 @@ type Client struct {
 
 // NewClient creates a new Client with default settings.
 func NewClient() *Client {
+	HTTPClient := circuit.NewHTTPClient(
+		defaultTimeout,
+		defaultThreshold,
+		defaultHTTPClient,
+	)
+
 	return &Client{
-		HTTPClient:   cleanhttp.DefaultClient(),
+		HTTPClient:   HTTPClient,
 		Logger:       log.New(os.Stderr, "", log.LstdFlags),
 		RetryWaitMin: defaultRetryWaitMin,
 		RetryWaitMax: defaultRetryWaitMax,
