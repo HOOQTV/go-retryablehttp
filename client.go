@@ -20,13 +20,13 @@ import (
 	"io/ioutil"
 	"log"
 	"math"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/hashicorp/go-cleanhttp"
 	"github.com/rubyist/circuitbreaker"
 )
 
@@ -39,7 +39,7 @@ var (
 	// Default circuit breaker configuration
 	defaultTimeout    = 1 * time.Minute
 	defaultThreshold  = int64(4)
-	defaultHTTPClient = cleanhttp.DefaultClient()
+	defaultHTTPClient = NewHTTPClient()
 
 	// defaultClient is used for performing requests without explicitly making
 	// a new client. It is purposely private to avoid modifications.
@@ -320,4 +320,20 @@ func PostForm(url string, data url.Values) (*http.Response, error) {
 // pre-filled url.Values form data.
 func (c *Client) PostForm(url string, data url.Values) (*http.Response, error) {
 	return c.Post(url, "application/x-www-form-urlencoded", strings.NewReader(data.Encode()))
+}
+
+// NewHTTPClient returns default http client
+func NewHTTPClient() *http.Client {
+	defaultRoundTripper := http.DefaultTransport
+	defaultTransportPointer, _ := defaultRoundTripper.(*http.Transport)
+
+	defaultTransport := *defaultTransportPointer
+	defaultTransport.MaxIdleConns = 1024
+	defaultTransport.MaxIdleConnsPerHost = 1024
+	defaultTransport.Dial = (&net.Dialer{
+		Timeout:   60 * time.Second,
+		KeepAlive: 60 * 60 * time.Second,
+	}).Dial
+
+	return &http.Client{Transport: &defaultTransport}
 }
