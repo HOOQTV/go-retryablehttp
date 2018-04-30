@@ -26,7 +26,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hashicorp/go-cleanhttp"
+	"github.com/hooqtv/go-cleanhttp"
 )
 
 var (
@@ -141,7 +141,7 @@ type Client struct {
 // NewClient creates a new Client with default settings.
 func NewClient() *Client {
 	return &Client{
-		HTTPClient:   cleanhttp.DefaultClient(),
+		HTTPClient:   cleanhttp.LoadPooledClient(),
 		Logger:       log.New(os.Stderr, "", log.LstdFlags),
 		RetryWaitMin: defaultRetryWaitMin,
 		RetryWaitMax: defaultRetryWaitMax,
