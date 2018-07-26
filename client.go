@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"math"
 	"net"
 	"net/http"
@@ -28,6 +27,7 @@ import (
 	"time"
 
 	"github.com/rubyist/circuitbreaker"
+	"go.uber.org/zap"
 )
 
 var (
@@ -44,6 +44,8 @@ var (
 	// defaultClient is used for performing requests without explicitly making
 	// a new client. It is purposely private to avoid modifications.
 	defaultClient = NewClient()
+
+	defaultLogger = NewLogger()
 
 	// We need to consume response bodies to maintain http connections, but
 	// limit the size we consume to respReadLimit.
@@ -94,14 +96,14 @@ func NewRequest(method, url string, body io.ReadSeeker) (*Request, error) {
 // request which will be made, and the retry number (0 for the initial
 // request) are available to users. The internal logger is exposed to
 // consumers.
-type RequestLogHook func(*log.Logger, *http.Request, int)
+type RequestLogHook func(*zap.Logger, *http.Request, int)
 
 // ResponseLogHook is like RequestLogHook, but allows running a function
 // on each HTTP response. This function will be invoked at the end of
 // every HTTP request executed, regardless of whether a subsequent retry
 // needs to be performed or not. If the response body is read or closed
 // from this method, this will affect the response returned from Do().
-type ResponseLogHook func(*log.Logger, *http.Response)
+type ResponseLogHook func(*zap.Logger, *http.Response)
 
 // CheckRetry specifies a policy for handling retries. It is called
 // following each request with the response and error values returned by
@@ -122,7 +124,7 @@ type Backoff func(min, max time.Duration, attemptNum int, resp *http.Response) t
 // like automatic retries to tolerate minor outages.
 type Client struct {
 	HTTPClient *circuit.HTTPClient // Internal HTTP client.
-	Logger     *log.Logger         // Customer logger instance.
+	Logger     *zap.Logger         // Customer logger instance.
 
 	RetryWaitMin time.Duration // Minimum time to wait
 	RetryWaitMax time.Duration // Maximum time to wait
@@ -154,7 +156,7 @@ func NewClient() *Client {
 
 	return &Client{
 		HTTPClient:   HTTPClient,
-		Logger:       log.New(os.Stderr, "", log.LstdFlags),
+		Logger:       defaultLogger,
 		RetryWaitMin: defaultRetryWaitMin,
 		RetryWaitMax: defaultRetryWaitMax,
 		RetryMax:     defaultRetryMax,
@@ -194,7 +196,7 @@ func DefaultBackoff(min, max time.Duration, attemptNum int, resp *http.Response)
 
 // Do wraps calling an HTTP method with retries.
 func (c *Client) Do(req *Request) (*http.Response, error) {
-	c.Logger.Printf("[DEBUG] %s %s", req.Method, req.URL)
+	c.Logger.Debug("HTTP", zap.String("method", req.Method), zap.String("url", req.URL.String()))
 
 	for i := 0; ; i++ {
 		var code int // HTTP response code
@@ -217,7 +219,7 @@ func (c *Client) Do(req *Request) (*http.Response, error) {
 		checkOK, checkErr := c.CheckRetry(resp, err)
 
 		if err != nil {
-			c.Logger.Printf("[ERR] %s %s request failed: %v", req.Method, req.URL, err)
+			c.Logger.Error("HTTP", zap.String("method", req.Method), zap.String("url", req.URL.String()))
 		} else {
 			// Call this here to maintain the behavior of logging all requests,
 			// even if CheckRetry signals to stop.
@@ -249,7 +251,6 @@ func (c *Client) Do(req *Request) (*http.Response, error) {
 		if code > 0 {
 			desc = fmt.Sprintf("%s (status: %d)", desc, code)
 		}
-		c.Logger.Printf("[DEBUG] %s: retrying in %s (%d left)", desc, wait, remain)
 		time.Sleep(wait)
 	}
 
@@ -263,7 +264,7 @@ func (c *Client) drainBody(body io.ReadCloser) {
 	defer body.Close()
 	_, err := io.Copy(ioutil.Discard, io.LimitReader(body, respReadLimit))
 	if err != nil {
-		c.Logger.Printf("[ERR] error reading response body: %v", err)
+		c.Logger.Error("HTTP", zap.String("message", "error parsing response body"), zap.String("url", err.Error()))
 	}
 }
 
@@ -336,4 +337,15 @@ func NewHTTPClient() *http.Client {
 	}).Dial
 
 	return &http.Client{Transport: &defaultTransport}
+}
+
+// NewLogger returns default zap logger
+func NewLogger() *zap.Logger {
+	logger, _ := zap.NewDevelopment()
+
+	if os.Getenv("APP_ENVIRONMENT") == "production" {
+		logger, _ = zap.NewProduction()
+	}
+	defer logger.Sync()
+	return logger
 }

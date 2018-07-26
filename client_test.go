@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"io/ioutil"
-	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +13,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 func TestRequest(t *testing.T) {
@@ -65,7 +66,7 @@ func TestClient_Do(t *testing.T) {
 	client.RetryWaitMin = 10 * time.Millisecond
 	client.RetryWaitMax = 50 * time.Millisecond
 	client.RetryMax = 50
-	client.RequestLogHook = func(logger *log.Logger, req *http.Request, retryNumber int) {
+	client.RequestLogHook = func(logger *zap.Logger, req *http.Request, retryNumber int) {
 		retryCount = retryNumber
 
 		if logger != client.Logger {
@@ -230,7 +231,7 @@ func TestClient_RequestLogHook(t *testing.T) {
 	testURIPath := "/foo/bar"
 
 	client := NewClient()
-	client.RequestLogHook = func(logger *log.Logger, req *http.Request, retry int) {
+	client.RequestLogHook = func(logger *zap.Logger, req *http.Request, retry int) {
 		retries = retry
 
 		if logger != client.Logger {
@@ -276,21 +277,20 @@ func TestClient_ResponseLogHook(t *testing.T) {
 	buf := new(bytes.Buffer)
 
 	client := NewClient()
-	client.Logger = log.New(buf, "", log.LstdFlags)
 	client.RetryWaitMin = 10 * time.Millisecond
 	client.RetryWaitMax = 10 * time.Millisecond
 	client.RetryMax = 15
-	client.ResponseLogHook = func(logger *log.Logger, resp *http.Response) {
+	client.ResponseLogHook = func(logger *zap.Logger, resp *http.Response) {
 		if resp.StatusCode == 200 {
 			// Log something when we get a 200
-			logger.Printf("test_log_pass")
+			logger.Info("HTTP", zap.String("res", "test_log_pass"))
 		} else {
 			// Log the response body when we get a 500
 			body, err := ioutil.ReadAll(resp.Body)
 			if err != nil {
 				t.Fatalf("err: %v", err)
 			}
-			logger.Printf("%s", body)
+			logger.Info("HTTP", zap.String("res", string(body)))
 		}
 	}
 
